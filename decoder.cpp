@@ -9,6 +9,8 @@
 
 using namespace std;
 
+#define ZIGZAG(n) (((n) >> 1) ^ (-((n) & 1)))
+
 
 enum Content
 {
@@ -47,7 +49,6 @@ public:
 		while(nextB(sm))
 		{
 			int b = static_cast<int> (buf[0]) & 0xff;
-			cout << "reading in " << hex << b << endl;
 			switch(state)
 			{
 				// assume header is right, need to change later
@@ -138,6 +139,12 @@ public:
 				else if (b >= 0x24 && b <= 0x27)
 				{
 					// integral number, not implemented
+					int l = b & 0x03;
+					if (l == 0)
+					{
+						int n = zigzagDecode(sm);
+						writeNum(js, n);
+					}
 				}
 				else if (b >= 0x28 && b <= 0x2b)
 				{
@@ -168,6 +175,9 @@ public:
 				else if (b >= 0xc0 && b <= 0xdf)
 				{
 					// small integers unimplemented
+					int original = (b - 0xc0);
+					int written = ZIGZAG(original);
+					writeNum(js, written);
 				}
 				else if (b == 0xe0)
 				{
@@ -266,14 +276,44 @@ public:
 		return;
 	}
 
-	void writeStr(ostream& js, string s)
+	void writeStr(ostream& js, string s, bool c = true)
 	{
-		cout << "directly writing " << s << endl;
-		writeChar(js, '\"');
-		js.write(s.c_str(), s.size());
-		writeChar(js, '\"');
+		if (c)
+		{
+			writeChar(js, '\"');
+			js.write(s.c_str(), s.size());
+			writeChar(js, '\"');
+		}
+		else
+		{
+			js.write(s.c_str(), s.size());
+		}
 		return;
 	}
+
+	void writeNum(ostream& js, int n)
+	{
+		char temp[33];
+		sprintf(temp, "%d", n);
+		string s(temp);
+		writeStr(js, s, false);
+	}
+
+	int zigzagDecode(fstream& sm)
+	{
+		int z = 0;
+		nextB(sm);
+		while(!(*buf & 0x80))
+		{
+			z <<= 7;
+			z |= (static_cast<int>(*buf) & 0x7f);
+			nextB(sm);
+		}
+		z <<= 6;
+		z |= (static_cast<int>(*buf) & 0x3f);
+		return ZIGZAG(z);
+	}
+
 
 	
 };
