@@ -33,6 +33,7 @@ public:
 	vector<string> unicode;
 	bool comma;
 	bool nextComma;
+	map<char, string> escapes;
 
 	Decoder()
 	{
@@ -42,6 +43,17 @@ public:
 		comma = false;
 		next = Value;
 		nextComma = true;
+		escapes.insert(pair<char, string>('\'', "\\\'"));
+		escapes.insert(pair<char, string>('\"',"\\\""));
+		escapes.insert(pair<char, string>('\?',"\\\?"));
+		escapes.insert(pair<char, string>('\\',"\\\\"));
+		escapes.insert(pair<char, string>('\a',"\\a"));
+		escapes.insert(pair<char, string>('\b',"\\b"));
+		escapes.insert(pair<char, string>('\f',"\\f"));
+		escapes.insert(pair<char, string>('\n',"\\n"));
+		escapes.insert(pair<char, string>('\r',"\\r"));
+		escapes.insert(pair<char, string>('\t',"\\t"));
+		escapes.insert(pair<char, string>('\v',"\\v"));
 	}
 
 	void decode(fstream& sm, ostream& js)
@@ -95,6 +107,10 @@ public:
 					objD --;
 					next = Key;
 				}
+				else
+				{
+					sm.putback(buf[0]);
+				}
 				if (arrD == 0 && b!= 0xfb)
 				{
 					writeChar(js, ':');
@@ -145,10 +161,34 @@ public:
 						int n = zigzagDecode(sm);
 						writeNum(js, n);
 					}
+					else if (l == 1)
+					{
+						long n = zigzagLong(sm);
+						writeNum(js, n);
+					}
+					else
+					{
+						// big integers not implemented
+					}
 				}
 				else if (b >= 0x28 && b <= 0x2b)
 				{
 					// floating point number, not implemented
+					int l = b & 0x03;
+					if (l == 0)
+					{
+						float n = readD(sm);
+						writeNum(js, n);
+					}
+					else if (l == 1)
+					{
+						double n = readD(sm);
+						writeNum(js, n);
+					}
+					else
+					{
+						// big floating numbers not implemented
+					}
 				}
 				else if (b >= 0x2c && b <= 0x3f)
 				{
@@ -166,11 +206,13 @@ public:
 				}
 				else if (b >= 0x80 && b <= 0x9f)
 				{
-					// tiny unicode unimplemented
+					int l = (b & 0x1f) + 2;
+					writeStr(sm, js, l, unicode);
 				}
 				else if (b >= 0xa0 && b <= 0xbf)
 				{
-					// short unicode unimplemented
+					int l = (b & 0x1f) + 34;
+					writeStr(sm, js, l, unicode);
 				}
 				else if (b >= 0xc0 && b <= 0xdf)
 				{
@@ -190,11 +232,18 @@ public:
 						longS += b[0];
 						sm.read(b, 1);
 					}
+					slvals.push_back(longS);
 					writeStr(js, longS);
 				}
 				else if (b == 0xec)
 				{
-					// shared long string reference, not implemented
+					nextB(sm);
+					int lsb = static_cast<int> (buf[0]) & 0xff;
+					int idx = (0x03 << 8) + lsb;
+					if (idx < skeys.size())
+					{
+						writeStr(js, skeys[idx]);
+					}
 				}
 				else if (b == 0xf8)
 				{
@@ -260,18 +309,35 @@ public:
 		char temp[length+1];
 		sm.read(temp, length);
 		temp[length] = '\0';
-		string s(temp);
-		cout << "s is " << s << endl;
+		string s = "";
+		int tempLength = length;
+		for (int i = 0; i < tempLength; i ++)
+		{
+			char t = temp[i];
+			if (escapes.find(t) == escapes.end())
+			{
+ 				s += t;
+			}
+			else
+			{
+				cout << "in dict " << t << endl;
+				string replace = escapes.find(t) -> second;
+				cout << "replacement " << replace << endl;
+				s += replace;
+				length += replace.size() - 1;
+			}
+		}
+		cout << "writing s " << s << endl;
 		ref.push_back(s);
 		if (c)
 		{
 			writeChar(js, '\"');
-			js.write(temp, length);
+			js.write(s.c_str(), length);
 			writeChar(js, '\"');
 		}
 		else
 		{
-			js.write(temp, length);
+			js.write(s.c_str(), length);
 		}
 		return;
 	}
@@ -299,7 +365,31 @@ public:
 		writeStr(js, s, false);
 	}
 
-	int zigzagDecode(fstream& sm)
+	void writeNum(ostream& js, long n)
+	{
+		char temp[65];
+		sprintf(temp, "%ld", n);
+		string s(temp);
+		writeStr(js, s, false);
+	}
+
+	void writeNum(ostream& js, float n)
+	{
+		char temp[33];
+		sprintf(temp, "%f", n);
+		string s(temp);
+		writeStr(js, s, false);
+	}
+
+	void writeNum(ostream& js, double n)
+	{
+		char temp[65];
+		sprintf(temp, "%f", n);
+		string s(temp);
+		writeStr(js, s, false);
+	}
+
+	int vInt(fstream& sm)
 	{
 		int z = 0;
 		nextB(sm);
@@ -311,9 +401,67 @@ public:
 		}
 		z <<= 6;
 		z |= (static_cast<int>(*buf) & 0x3f);
+		return z;
+	}
+
+	int zigzagDecode(fstream& sm)
+	{
+		int z = vInt(sm);
 		return ZIGZAG(z);
 	}
 
+	long vLong(fstream& sm)
+	{
+		long z = 0;
+		nextB(sm);
+		while(!(*buf & 0x80))
+		{
+			z <<= 7;
+			z |= (static_cast<long>(*buf) & 0x7f);
+			nextB(sm);
+		}
+		z <<= 6;
+		z |= (static_cast<long>(*buf) & 0x3f);
+		return z;
+	}
+
+	long zigzagLong(fstream& sm)
+	{
+		long z = vLong(sm);
+		return ZIGZAG(z);
+	}
+
+	double readD(fstream& sm)
+	{
+		nextB(sm);
+		long l = static_cast<long>(buf[0])&0xff;
+		for (int i = 0; i < 9; i ++)
+		{
+			nextB(sm);
+			long k = static_cast<long>(buf[0])&0xff;
+			l <<= 7;
+			l |= k;
+		}
+		assert(sizeof(long) == sizeof(double));
+		double d = reinterpret_cast<double&>(l);
+		return d;
+	}
+
+	float readF(fstream& sm)
+	{
+		nextB(sm);
+		int n = static_cast<int>(buf[0])&0xff;
+		for (int i = 0; i < 5; i ++)
+		{
+			nextB(sm);
+			int k = static_cast<int>(buf[0])&0xff;
+			n <<= 7;
+			n |= k;
+		}
+		assert(sizeof(float) == sizeof(int));
+		float f = reinterpret_cast<float&>(n);
+		return f;
+	}
 
 	
 };
