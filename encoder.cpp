@@ -44,10 +44,9 @@ public:
 
 	void writeNum(ostream &sm, int value, int l)
 	{
-		cout << "writing number " << value << endl;
+		//cout << "writing number " << value << endl;
 		char* newV = reinterpret_cast<char *> (&value);
 		sm.write(newV, l);
-		//sm << hex << value;
 	}
 
 	void encode(istream& js, ostream& sm)
@@ -74,6 +73,10 @@ public:
 					case '\"':
 					readKey(js, sm);
 					state = Value;
+					break;
+					case ' ':
+					break;
+					case '\n':
 					break;
 					default:
 					js.putback(c);
@@ -109,7 +112,7 @@ public:
 						case '}':
 						writeNum(sm, 0xfb, 1);
 						objD -= 1;
-						if (objD == 0)
+						if (objD <= 0)
 							done = false;
 						next = Free;
 						state = Key;
@@ -124,6 +127,10 @@ public:
 						{
 							state = Key;
 						}
+						break;
+						case ' ':
+						break;
+						case '\n':
 						break;
 						default:
 						js.putback(c);
@@ -167,8 +174,56 @@ public:
 		cout << "reading key starting with " << c << endl;
 		while (c != '\"')
 		{
-			buf.push_back(c);
-			js >> noskipws >> c;
+			if (c == '\\')
+			{
+				js >> noskipws >> c;
+				switch(c)
+				{
+					case '\"':
+					buf.push_back('\"');
+					break;
+					case '\\':
+					buf.push_back('\\');
+					break;
+					case '\?':
+					buf.push_back('\?');
+					break;
+					case '\'':
+					buf.push_back('\'');
+					break;
+					case 'a':
+					buf.push_back('\a');
+					break;
+					case 'b':
+					buf.push_back('\b');
+					break;
+					case 'f':
+					buf.push_back('\f');
+					break;
+					case 'n':
+					buf.push_back('\n');
+					break;
+					case 'r':
+					buf.push_back('\r');
+					break;
+					case 't':
+					buf.push_back('\t');
+					break;
+					case 'v':
+					buf.push_back('\v');
+					break;
+					default:
+					buf.push_back('\\');
+					buf.push_back(c);
+					break;
+				}
+				js >> noskipws >> c;
+			}
+			else
+			{
+				buf.push_back(c);
+				js >> noskipws >> c;
+			}
 		}
 		string s(buf.begin(), buf.end());
 		int sizes = s.size();
@@ -219,8 +274,56 @@ public:
 		{
 			while (c != '\"')
 			{
-				buf.push_back(c);
-				js >> noskipws >> c;
+				if (c == '\\')
+				{
+					js >> noskipws >> c;
+					switch(c)
+					{
+						case '\"':
+						buf.push_back('\"');
+						break;
+						case '\\':
+						buf.push_back('\\');
+						break;
+						case '\?':
+						buf.push_back('\?');
+						break;
+						case '\'':
+						buf.push_back('\'');
+						break;
+						case 'a':
+						buf.push_back('\a');
+						break;
+						case 'b':
+						buf.push_back('\b');
+						break;
+						case 'f':
+						buf.push_back('\f');
+						break;
+						case 'n':
+						buf.push_back('\n');
+						break;
+						case 'r':
+						buf.push_back('\r');
+						break;
+						case 't':
+						buf.push_back('\t');
+						break;
+						case 'v':
+						buf.push_back('\v');
+						break;
+						default:
+						buf.push_back('\\');
+						buf.push_back(c);
+						break;
+					}
+					js >> noskipws >> c;
+				}
+				else
+				{
+					buf.push_back(c);
+					js >> noskipws >> c;
+				}
 			}
 		}
 		else
@@ -230,27 +333,68 @@ public:
 				buf.push_back(c);
 				js >> c;
 			}
+			js.putback(c);
 		}
 		string s(buf.begin(), buf.end());
-		try 
+		cout << "reading " << s << endl;
+		if (s.compare("false")  == 0|| s.compare("False") == 0)
 		{
-			value = stoi(s);
-			cout << "writing number " << value << endl;
-			sm << hex << value;
-			//sm.write(reinterpret_cast<char *> (&value), sizeof(value));
+			writeNum(sm, 0x22, 1);
+			return;
 		}
-		catch (exception& e)
+		if (s.compare("true")  == 0|| s.compare("True") == 0)
 		{
-			if (s.compare("false")  == 0|| s.compare("False") == 0)
+			writeNum(sm, 0x23, 1);
+			return;
+		}
+		if (s.compare("null")  == 0|| s.compare("Null") == 0)
+		{
+			writeNum(sm, 0x21, 1);
+			return;
+		}
+		// without a quotation mark, it's either an integer or a decimal number
+		if (!quotation) 
+		{
+			// if we can convert it to a double
+			try
 			{
-				writeNum(sm, 0x22, 1);
-				return;
+				double d = stod(s);
+				float f = static_cast<float>(d);
+				double dd = static_cast<double>(f);
+				// can be expressed with a float
+				if (d == dd)
+				{
+					writeNum(sm, f);
+				}
+				else
+				{
+					writeNum(sm, d);
+				}
 			}
-			if (s.compare("true")  == 0|| s.compare("True") == 0)
+			catch (invalid_argument& e)
 			{
-				writeNum(sm, 0x23, 1);
-				return;
+				long l = stol(s);
+				int n = static_cast<int>(l);
+				long ll = static_cast<long>(n);
+				// small integer
+				if (l >= -16 && l <= 15)
+				{
+					int k = (n >> 31) ^ (n << 1);
+					writeNum(sm, (0xc0|k), 1);
+				}
+				else if (l == ll)
+				{
+					// can be expressed with an int
+					writeNum(sm, n);
+				}
+				else
+				{
+					writeNum(sm, l);
+				}
 			}
+		}
+		else
+		{
 			int sizes = s.size();
 			// assume it's short ascii, other cases not implemented
 			if (sizes <= 32)
@@ -292,6 +436,80 @@ public:
 				sm.write(s.c_str(),sizes);
 				writeNum(sm, 0xfc, 1);
 			}
+		}
+	}
+
+	void writeNum(ostream& sm, int n)
+	{
+		writeNum(sm, 0x24, 1);
+		int k = (n >> 31) ^ (n << 1);
+		vector<int> words;
+		words.push_back(k&0x3f);
+		k >>= 6;
+		while (k > 0)
+		{
+			words.push_back(k&0x7f);
+			k >>= 7;
+		}
+		for (int i = words.size() - 1; i >= 1; i --)
+		{
+			writeNum(sm, words[i]&0x7f, 1);
+		}
+		writeNum(sm, (words[0]&0x3f)|0x80, 1);
+	}
+
+	void writeNum(ostream& sm, long n)
+	{
+		writeNum(sm, 0x25, 1);
+		long k = (n >> 63) ^ (n << 1);
+		vector<long> words;
+		words.push_back(k&0x3f);
+		k >>= 6;
+		while (k > 0)
+		{
+			words.push_back(k&0x7f);
+			k >>= 7;
+		}
+		for (int i = words.size() - 1; i >= 1; i --)
+		{
+			int next = static_cast<int>(words[i]&0x7f);
+			writeNum(sm, next, 1);
+		}
+		int next = static_cast<int>((words[0]&0x3f)|0x80);
+		writeNum(sm, next, 1);
+	}
+
+	void writeNum(ostream& sm, float f)
+	{
+		writeNum(sm, 0x28, 1);
+		assert(sizeof(float) == sizeof(int));
+		int k = reinterpret_cast<int&>(f);
+		vector<int> words;
+		for (int i = 0; i < 5; i ++)
+		{
+			words.push_back(k&0x7f);
+			k >>= 7;
+		}
+		for (int i = words.size() - 1; i >= 0; i --)
+		{
+			writeNum(sm, words[i]&0x7f, 1);
+		}
+	}
+
+	void writeNum(ostream& sm, double d)
+	{
+		writeNum(sm, 0x29, 1);
+		assert(sizeof(double) == sizeof(long));
+		long k = reinterpret_cast<long&>(d);
+		vector<int> words;
+		for (int i = 0; i < 10; i ++)
+		{
+			words.push_back(static_cast<int>(k&0x7f));
+			k >>= 7;
+		}
+		for (int i = words.size() - 1; i >= 0; i --)
+		{
+			writeNum(sm, words[i]&0x7f, 1);
 		}
 	}
 };
