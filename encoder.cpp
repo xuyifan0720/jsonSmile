@@ -170,13 +170,22 @@ public:
 		char c; 
 		vector <char> buf;
 		int value;
+		bool allAscii = true;
 		js >> c;
 		cout << "reading key starting with " << c << endl;
+		if (!isascii(c))
+		{
+			allAscii = false;
+		}
 		while (c != '\"')
 		{
 			if (c == '\\')
 			{
 				js >> noskipws >> c;
+				if (!isascii(c))
+				{
+					allAscii = false;
+				}
 				switch(c)
 				{
 					case '\"':
@@ -218,21 +227,40 @@ public:
 					break;
 				}
 				js >> noskipws >> c;
+				if (!isascii(c))
+				{
+					allAscii = false;
+				}
 			}
 			else
 			{
 				buf.push_back(c);
 				js >> noskipws >> c;
+				if (!isascii(c))
+				{
+					allAscii = false;
+				}
 			}
 		}
 		string s(buf.begin(), buf.end());
 		int sizes = s.size();
+		int encSize = 0;
+		int msb = 0;
+		if (allAscii)
+		{
+			encSize = sizes - 1;
+			msb = 0x80;
+		}
+		else
+		{
+			encSize = sizes - 2;
+			msb = 0xc0;
+		}
 		if (sizes <= 64)
 		{
 			if (skeys.find(s) == skeys.end())
 			{
-				int encodedSize = sizes - 1;
-				writeNum(sm, 0x80|encodedSize, 1);
+				writeNum(sm, msb|encSize, 1);
 				cout << "writing key " << s << endl;
 				sm.write(s.c_str(),sizes);
 				if (kp < 64)
@@ -263,7 +291,12 @@ public:
 		char c; 
 		vector <char> buf;
 		int value;
+		bool allAscii = true;
 		js >> c;
+		if (!isascii(c))
+		{
+			allAscii = false;
+		}
 		cout << "reading word starting with " << c << endl; 
 		if (c == '\"')
 		{
@@ -277,6 +310,10 @@ public:
 				if (c == '\\')
 				{
 					js >> noskipws >> c;
+					if (!isascii(c))
+					{
+						allAscii = false;
+					}
 					switch(c)
 					{
 						case '\"':
@@ -318,11 +355,19 @@ public:
 						break;
 					}
 					js >> noskipws >> c;
+					if (!isascii(c))
+					{
+						allAscii = false;
+					}
 				}
 				else
 				{
 					buf.push_back(c);
 					js >> noskipws >> c;
+					if (!isascii(c))
+					{
+						allAscii = false;
+					}
 				}
 			}
 		}
@@ -358,21 +403,6 @@ public:
 			// if we can convert it to a double
 			try
 			{
-				double d = stod(s);
-				float f = static_cast<float>(d);
-				double dd = static_cast<double>(f);
-				// can be expressed with a float
-				if (d == dd)
-				{
-					writeNum(sm, f);
-				}
-				else
-				{
-					writeNum(sm, d);
-				}
-			}
-			catch (invalid_argument& e)
-			{
 				long l = stol(s);
 				int n = static_cast<int>(l);
 				long ll = static_cast<long>(n);
@@ -392,17 +422,67 @@ public:
 					writeNum(sm, l);
 				}
 			}
+			catch (invalid_argument& e)
+			{
+				try
+				{
+					double d = stod(s);
+					float f = static_cast<float>(d);
+					double dd = static_cast<double>(f);
+					// can be expressed with a float
+					if (d == dd)
+					{
+						writeNum(sm, f);
+					}
+					else
+					{
+						writeNum(sm, d);
+					}
+				}
+				catch (invalid_argument& ia)
+				{
+					goto normalString;
+				}
+			}
 		}
 		else
 		{
+normalString:
+			int msb = 0;
+			int encSize = 0;
 			int sizes = s.size();
-			// assume it's short ascii, other cases not implemented
-			if (sizes <= 32)
+			if (sizes <= 64)
 			{
+				if (allAscii)
+				{
+					if (sizes <= 32)
+					{
+						encSize = sizes - 1;
+						msb = 0x40;
+					}
+					else
+					{
+						encSize = sizes - 33;
+						msb = 0x60;
+					}
+				}
+				else
+				{
+					if (sizes <= 33)
+					{
+						encSize = sizes - 2;
+						msb = 0x80;
+					}
+					else
+					{
+						encSize = sizes - 34;
+						msb = 0xa0;
+					}
+				}
+
 				if (svals.find(s) == svals.end())
 				{
-					int encodedSize = sizes - 1;
-					writeNum(sm, 0x40|encodedSize, 1);
+					writeNum(sm, msb|encSize, 1);
 					cout << "writing word " << s << endl;
 					sm.write(s.c_str(),sizes);
 					if (vp < 32)
@@ -419,15 +499,6 @@ public:
 					writeNum(sm, pos, 1);
 					return;
 				}
-
-			}
-			else if (sizes <= 64)
-			{
-				int encodedSize = sizes - 33;
-				writeNum(sm, 0x60|encodedSize, 1);
-				cout << "writing word " << s << endl;
-				sm.write(s.c_str(),sizes);
-				return;
 			}
 			else
 			{
@@ -512,6 +583,8 @@ public:
 			writeNum(sm, words[i]&0x7f, 1);
 		}
 	}
+
+
 };
 
 
