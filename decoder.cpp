@@ -22,17 +22,31 @@ enum Content
 class Decoder
 {
 public:
+	// keep track of current state
 	Content state;
+	// keep track of the state after the current byte
 	Content next;
+	// read one byte at a time
 	char buf[1];
+	// array depth
 	int arrD;
+	// object depth
 	int objD;
+	// shared key reference
 	vector<string> skeys;
+	// shared value reference
 	vector<string> svals;
+	// shared long value reference 
+	// currently not used in smile format, but good to have it here
 	vector<string> slvals;
+	// shared unicode reference
+	// currently not used in smile format
 	vector<string> unicode;
+	// whether to write a comma before writing current content
 	bool comma;
+	// whether the next content would need comma
 	bool nextComma;
+	// escape characters
 	map<char, string> escapes;
 
 	Decoder()
@@ -43,6 +57,8 @@ public:
 		comma = false;
 		next = Value;
 		nextComma = true;
+
+		// all the escape characters we'll use
 		escapes.insert(pair<char, string>('\'', "\\\'"));
 		escapes.insert(pair<char, string>('\"',"\\\""));
 		escapes.insert(pair<char, string>('\?',"\\\?"));
@@ -64,24 +80,29 @@ public:
 			switch(state)
 			{
 				// assume header is right, need to change later
+				// read 3 more bytes
 				case Head:
 				nextB(sm);
 				nextB(sm);
 				nextB(sm);
 				state = Value;
 				break;
+				// when it's a key, by default the next item is a value
 				case Key:
 				next = Value;
 				nextComma = true;
+				// if it's not }, then test whether we have to write comma before this key
 				if (b != 0xfb)
 				{
 					writeComma(js);
 				}
+				// empty string
 				if (b == 0x20)
 				{
 					writeChar(js, '\"');
 					writeChar(js, '\"');
 				}
+				// shared string reference
 				else if (b >= 0x40 && b <= 0x7f)
 				{
 					int idx = b & 0x3f;
@@ -90,14 +111,15 @@ public:
 						writeStr(js, skeys[idx]);
 					}
 				}
+				// ascii string
 				else if (b >= 0x80 && b <= 0xbf)
 				{
 					int l = b & 0x3f;
 					writeStr(sm, js, l+1, skeys);
 				}
+				// unicode string
 				else if (b >= 0xc0 && b <= 0xf7)
 				{
-					// unicode, not implemented yet
 					int l = b - 0xc0 + 2;
 					writeStr(sm, js, l, unicode);
 				}
@@ -111,6 +133,7 @@ public:
 				{
 					sm.putback(buf[0]);
 				}
+				// if we're not in an array and it's not }, write a :
 				if (arrD == 0 && b!= 0xfb)
 				{
 					writeChar(js, ':');
@@ -127,9 +150,10 @@ public:
 				{
 					writeComma(js);
 				}
+				// short string reference
 				if (b < 0x20)
 				{
-					cout << "checking index " << b-1 << " for value" << endl;
+					//cout << "checking index " << b-1 << " for value" << endl;
 					if (b-1 < svals.size())
 					{
 						writeStr(js, svals[b-1]);
@@ -152,9 +176,9 @@ public:
 				{
 					writeStr(js, "true");
 				}
+				// integral number
 				else if (b >= 0x24 && b <= 0x27)
 				{
-					// integral number, not implemented
 					int l = b & 0x03;
 					if (l == 0)
 					{
@@ -171,9 +195,9 @@ public:
 						// big integers not implemented
 					}
 				}
+				// floating point number
 				else if (b >= 0x28 && b <= 0x2b)
 				{
-					// floating point number, not implemented
 					int l = b & 0x03;
 					if (l == 0)
 					{
@@ -194,39 +218,45 @@ public:
 				{
 					// reserved
 				}
+				// short ascii
 				else if (b >= 0x40 && b <= 0x5f)
 				{
 					int l = (b & 0x1f) + 1;
 					writeStr(sm, js, l, svals);
 				}
+				// middle-length ascii
 				else if (b >= 0x60 && b <= 0x7f)
 				{
 					int l = (b & 0x1f) + 33;
 					writeStr(sm, js, l, svals);
 				}
+				// short unicode
 				else if (b >= 0x80 && b <= 0x9f)
 				{
 					int l = (b & 0x1f) + 2;
 					writeStr(sm, js, l, unicode);
 				}
+				// middle-length unicode
 				else if (b >= 0xa0 && b <= 0xbf)
 				{
 					int l = (b & 0x1f) + 34;
 					writeStr(sm, js, l, unicode);
 				}
+				// small integers
 				else if (b >= 0xc0 && b <= 0xdf)
 				{
-					// small integers unimplemented
 					int original = (b - 0xc0);
 					int written = ZIGZAG(original);
 					writeNum(js, written);
 				}
+				// long string
 				else if (b == 0xe0)
 				{
 					cout << "writing long stuff " << endl;
 					char b[1];
 					sm.read(b, 1);
 					string longS("");
+					// read characters until 0xfc is encountered
 					while((static_cast<unsigned int> (b[0]) & 0xff) != 0xfc)
 					{
 						longS += b[0];
@@ -235,6 +265,7 @@ public:
 					slvals.push_back(longS);
 					writeStr(js, longS);
 				}
+				// shared long string
 				else if (b == 0xec)
 				{
 					nextB(sm);
@@ -245,6 +276,7 @@ public:
 						writeStr(js, skeys[idx]);
 					}
 				}
+				// structural markers
 				else if (b == 0xf8)
 				{
 					writeChar(js, '[');
@@ -288,12 +320,14 @@ public:
 		}
 	}
 
+	// write one character
 	void writeChar(ostream& js, char c)
 	{
 		string cs(1, c);
 		js.write(cs.c_str(), 1);
 	}
 
+	// read one byte
 	bool nextB(fstream& sm)
 	{
 		sm.read(buf, 1);
@@ -303,6 +337,9 @@ public:
 			return false;
 	}
 
+	// read length bytes from instream and write them as a string to outstream
+	// save the reference to ref
+	// c is whether to write quotation mark around it
 	void writeStr(fstream& sm, ostream& js, int length, 
 		vector<string>& ref, bool c = true)
 	{
@@ -314,20 +351,21 @@ public:
 		for (int i = 0; i < tempLength; i ++)
 		{
 			char t = temp[i];
+			// replace escape character 
 			if (escapes.find(t) == escapes.end())
 			{
  				s += t;
 			}
 			else
 			{
-				cout << "in dict " << t << endl;
+				//cout << "in dict " << t << endl;
 				string replace = escapes.find(t) -> second;
-				cout << "replacement " << replace << endl;
+				//cout << "replacement " << replace << endl;
 				s += replace;
 				length += replace.size() - 1;
 			}
 		}
-		cout << "writing s " << s << endl;
+		//cout << "writing s " << s << endl;
 		ref.push_back(s);
 		if (c)
 		{
@@ -342,6 +380,7 @@ public:
 		return;
 	}
 
+	// write a constant string s
 	void writeStr(ostream& js, string s, bool c = true)
 	{
 		if (c)
@@ -357,6 +396,7 @@ public:
 		return;
 	}
 
+	// write an integer
 	void writeNum(ostream& js, int n)
 	{
 		char temp[33];
@@ -365,6 +405,7 @@ public:
 		writeStr(js, s, false);
 	}
 
+	// write a long
 	void writeNum(ostream& js, long n)
 	{
 		char temp[65];
@@ -373,6 +414,7 @@ public:
 		writeStr(js, s, false);
 	}
 
+	// write a float
 	void writeNum(ostream& js, float n)
 	{
 		char temp[33];
@@ -381,6 +423,7 @@ public:
 		writeStr(js, s, false);
 	}
 
+	// write a double
 	void writeNum(ostream& js, double n)
 	{
 		char temp[65];
@@ -389,6 +432,7 @@ public:
 		writeStr(js, s, false);
 	}
 
+	// read one integer that is not zigzag encoded
 	int vInt(fstream& sm)
 	{
 		int z = 0;
@@ -404,12 +448,14 @@ public:
 		return z;
 	}
 
+	// read one integer and zigzag decode it
 	int zigzagDecode(fstream& sm)
 	{
 		int z = vInt(sm);
 		return ZIGZAG(z);
 	}
 
+	// read one long
 	long vLong(fstream& sm)
 	{
 		long z = 0;
@@ -431,6 +477,7 @@ public:
 		return ZIGZAG(z);
 	}
 
+	// read one double
 	double readD(fstream& sm)
 	{
 		nextB(sm);
@@ -447,6 +494,7 @@ public:
 		return d;
 	}
 
+	// read one float
 	float readF(fstream& sm)
 	{
 		nextB(sm);

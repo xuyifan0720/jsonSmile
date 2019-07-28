@@ -42,6 +42,7 @@ public:
 		vp = 1;
 	}
 
+	// write a number that is l bytes long
 	void writeNum(ostream &sm, int value, int l)
 	{
 		//cout << "writing number " << value << endl;
@@ -57,10 +58,12 @@ public:
 		int arrD = 0;
 		int objD = 0;
 		bool done = true;
+		// keep looping until we reach the end }
 		while (done)
 		{
 			switch(state)
 			{
+				// write smile format header
 				case Head:
 				sm << ":)" << endl;
 				writeNum(sm, 0x03, 1);
@@ -70,14 +73,17 @@ public:
 				js >> c;
 				switch(c)
 				{
+					// read string in the quotation mark
 					case '\"':
 					readKey(js, sm);
 					state = Value;
 					break;
+					// skip whitespace and newline
 					case ' ':
 					break;
 					case '\n':
 					break;
+					// key needs to be a string
 					default:
 					js.putback(c);
 					state = Value;
@@ -89,9 +95,10 @@ public:
 				{
 					case Free:
 					js >> c;
-					cout << "encountering " << c << endl;
+					//cout << "encountering " << c << endl;
 					switch(c)
 					{
+						// structural markers. ] and } may denote the end of the file
 						case '[':
 						writeNum(sm, 0xf8, 1);
 						state = Value;
@@ -100,6 +107,8 @@ public:
 						case ']':
 						writeNum(sm, 0xf9, 1);
 						arrD -= 1;
+						if (objD <= 0 && arrD <= 0)
+							done = false;
 						next = Free;
 						state = Key;
 						break;
@@ -112,11 +121,12 @@ public:
 						case '}':
 						writeNum(sm, 0xfb, 1);
 						objD -= 1;
-						if (objD <= 0)
+						if (objD <= 0 && arrD <= 0)
 							done = false;
 						next = Free;
 						state = Key;
 						break;
+						// a quotation mark means the value is a string
 						case '\"':
 						readWord(js, sm, true);
 						break;
@@ -128,16 +138,19 @@ public:
 							state = Key;
 						}
 						break;
+						// skip white space and newline
 						case ' ':
 						break;
 						case '\n':
 						break;
+						// otherwise, it's a number, float, or a literal (true, false, null)
 						default:
 						js.putback(c);
 						readWord(js, sm, false);
 						break;
 					}
 					break;
+					// this case is actually never used, but i just left it there
 					case Word:
 					{
 					char cc = js.peek();
@@ -165,6 +178,7 @@ public:
 		}
 	}
 
+	// read a key
 	void readKey(istream& js, ostream& sm)
 	{
 		char c; 
@@ -172,13 +186,16 @@ public:
 		int value;
 		bool allAscii = true;
 		js >> c;
-		cout << "reading key starting with " << c << endl;
+		//cout << "reading key starting with " << c << endl;
+		// if we encounter any non-ascii character, it's a unicode. 
 		if (!isascii(c))
 		{
 			allAscii = false;
 		}
+		// read all characters before the end quotation mark
 		while (c != '\"')
 		{
+			// handle escape characters
 			if (c == '\\')
 			{
 				js >> noskipws >> c;
@@ -232,6 +249,7 @@ public:
 					allAscii = false;
 				}
 			}
+			// collects the characters in a vector
 			else
 			{
 				buf.push_back(c);
@@ -246,6 +264,7 @@ public:
 		int sizes = s.size();
 		int encSize = 0;
 		int msb = 0;
+		// use the size of the string and whether it's character or unicode to decide its smile token
 		if (allAscii)
 		{
 			encSize = sizes - 1;
@@ -256,6 +275,7 @@ public:
 			encSize = sizes - 2;
 			msb = 0xc0;
 		}
+		// small strings
 		if (sizes <= 64)
 		{
 			if (skeys.find(s) == skeys.end())
@@ -278,7 +298,7 @@ public:
 				return;
 			}
 		}
-		// long string, not yet implemented
+		// long string, I dont think smile format supports long key string
 		else
 		{
 			cout << "writing word " << s << endl;
@@ -286,6 +306,7 @@ public:
 		}
 	}
 
+	// read a value
 	void readWord(istream& js, ostream& sm, bool quotation)
 	{
 		char c; 
@@ -297,16 +318,18 @@ public:
 		{
 			allAscii = false;
 		}
-		cout << "reading word starting with " << c << endl; 
+		//cout << "reading word starting with " << c << endl; 
 		if (c == '\"')
 		{
 			writeNum(sm, 0x20, 1);
 			return;
 		}
+		// if the string starts with a quotation mark, read until the end quotation mark
 		if (quotation)
 		{
 			while (c != '\"')
 			{
+				// handle escape characters
 				if (c == '\\')
 				{
 					js >> noskipws >> c;
@@ -360,6 +383,7 @@ public:
 						allAscii = false;
 					}
 				}
+				// check if we have an ascii string or a unicode string
 				else
 				{
 					buf.push_back(c);
@@ -371,6 +395,7 @@ public:
 				}
 			}
 		}
+		// if there's no quotation mark, read until we hit a , or structural marker
 		else
 		{
 			while (c != '}' && c!= ']' && c!=',')
@@ -382,6 +407,7 @@ public:
 		}
 		string s(buf.begin(), buf.end());
 		cout << "reading " << s << endl;
+		// compare out string to literals
 		if (s.compare("false")  == 0|| s.compare("False") == 0)
 		{
 			writeNum(sm, 0x22, 1);
@@ -400,7 +426,7 @@ public:
 		// without a quotation mark, it's either an integer or a decimal number
 		if (!quotation) 
 		{
-			// if we can convert it to a double
+			// if we can convert it to an integer
 			try
 			{
 				long l = stol(s);
@@ -422,6 +448,7 @@ public:
 					writeNum(sm, l);
 				}
 			}
+			// if we can't convert it to an integer, it's a decimal number
 			catch (invalid_argument& e)
 			{
 				try
@@ -441,6 +468,7 @@ public:
 				}
 				catch (invalid_argument& ia)
 				{
+					// if we can't convert it to decimal either, handle it like a normal string
 					goto normalString;
 				}
 			}
@@ -451,6 +479,7 @@ normalString:
 			int msb = 0;
 			int encSize = 0;
 			int sizes = s.size();
+			// determine the smile format token initializer 
 			if (sizes <= 64)
 			{
 				if (allAscii)
@@ -480,10 +509,11 @@ normalString:
 					}
 				}
 
+				// check whether it's in reference
 				if (svals.find(s) == svals.end())
 				{
 					writeNum(sm, msb|encSize, 1);
-					cout << "writing word " << s << endl;
+					//cout << "writing word " << s << endl;
 					sm.write(s.c_str(),sizes);
 					if (vp < 32)
 					{
@@ -493,6 +523,7 @@ normalString:
 					}
 					return;
 				}
+				// write the reference number instead
 				else
 				{
 					int pos = vref.find(s)->second;
@@ -500,6 +531,7 @@ normalString:
 					return;
 				}
 			}
+			// write a long string
 			else
 			{
 				cout << "writing word " << s << endl;
@@ -510,6 +542,7 @@ normalString:
 		}
 	}
 
+	// write an integer (zigzag encoded)
 	void writeNum(ostream& sm, int n)
 	{
 		writeNum(sm, 0x24, 1);
@@ -529,6 +562,7 @@ normalString:
 		writeNum(sm, (words[0]&0x3f)|0x80, 1);
 	}
 
+	// write a long (zigzag encoded)
 	void writeNum(ostream& sm, long n)
 	{
 		writeNum(sm, 0x25, 1);
@@ -550,6 +584,7 @@ normalString:
 		writeNum(sm, next, 1);
 	}
 
+	// write a floating point
 	void writeNum(ostream& sm, float f)
 	{
 		writeNum(sm, 0x28, 1);
@@ -567,6 +602,7 @@ normalString:
 		}
 	}
 
+	// write a double
 	void writeNum(ostream& sm, double d)
 	{
 		writeNum(sm, 0x29, 1);
