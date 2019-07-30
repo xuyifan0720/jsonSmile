@@ -13,17 +13,17 @@ Decoder::Decoder()
 		objD.push_back(0);
 
 	// all the escape characters we'll use
-	escapes.insert(pair<char, string>('\'', "\\\'"));
+	//escapes.insert(pair<char, string>('\'', "\\\'"));
 	escapes.insert(pair<char, string>('\"',"\\\""));
-	escapes.insert(pair<char, string>('\?',"\\\?"));
+	//escapes.insert(pair<char, string>('\?',"\\\?"));
 	escapes.insert(pair<char, string>('\\',"\\\\"));
-	escapes.insert(pair<char, string>('\a',"\\a"));
+	//escapes.insert(pair<char, string>('\a',"\\a"));
 	escapes.insert(pair<char, string>('\b',"\\b"));
 	escapes.insert(pair<char, string>('\f',"\\f"));
 	escapes.insert(pair<char, string>('\n',"\\n"));
 	escapes.insert(pair<char, string>('\r',"\\r"));
 	escapes.insert(pair<char, string>('\t',"\\t"));
-	escapes.insert(pair<char, string>('\v',"\\v"));
+	//escapes.insert(pair<char, string>('\v',"\\v"));
 }
 
 void Decoder::decode(fstream& sm, ostream& js)
@@ -125,15 +125,15 @@ void Decoder::decode(fstream& sm, ostream& js)
 			}
 			else if (b == 0x21)
 			{
-				writeStr(js, "null");
+				writeStr(js, "null", false);
 			}
 			else if (b == 0x22)
 			{
-				writeStr(js, "false");
+				writeStr(js, "false", false);
 			}
 			else if (b == 0x23)
 			{
-				writeStr(js, "true");
+				writeStr(js, "true", false);
 			}
 			// integral number
 			else if (b >= 0x24 && b <= 0x27)
@@ -218,7 +218,17 @@ void Decoder::decode(fstream& sm, ostream& js)
 				// read characters until 0xfc is encountered
 				while((static_cast<unsigned int> (b[0]) & 0xff) != 0xfc)
 				{
-					longS += b[0];
+					if (escapes.find(b[0]) == escapes.end())
+					{
+						longS += b[0];
+					}
+					else
+					{
+						//cout << "in dict " << t << endl;
+						string replace = escapes.find(b[0]) -> second;
+						//cout << "replacement " << replace << endl;
+						longS += replace;
+					}
 					sm.read(b, 1);
 				}
 				slvals.push_back(longS);
