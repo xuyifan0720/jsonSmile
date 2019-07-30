@@ -66,7 +66,7 @@ void Encoder::encode(istream& js, ostream& sm)
 			{
 				case Free:
 				js >> c;
-				//cout << "encountering " << c << endl;
+				cout << "encountering " << c << endl;
 				switch(c)
 				{
 					// structural markers. ] and } may denote the end of the file

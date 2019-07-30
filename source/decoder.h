@@ -35,7 +35,7 @@ public:
 	// array depth
 	int arrD;
 	// object depth
-	int objD;
+	vector<int> objD;
 	// shared key reference
 	vector<string> skeys;
 	// shared value reference
@@ -54,6 +54,8 @@ public:
 	map<char, string> escapes;
 	Decoder();
 	void decode(fstream& sm, ostream& js);
+	void incObjD();
+	void decObjD();
 	void writeComma(ostream& js);
 	void writeChar(ostream& js, char c);
 	bool nextB(fstream& sm);

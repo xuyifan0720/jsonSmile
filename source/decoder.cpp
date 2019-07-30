@@ -5,10 +5,12 @@ Decoder::Decoder()
 {
 	state = Head;
 	arrD = 0;
-	objD = 0;
 	comma = false;
 	next = Value;
 	nextComma = true;
+
+	for (int i = 0; i < 1; i ++)
+		objD.push_back(0);
 
 	// all the escape characters we'll use
 	escapes.insert(pair<char, string>('\'', "\\\'"));
@@ -78,15 +80,20 @@ void Decoder::decode(fstream& sm, ostream& js)
 			else if (b == 0xfb)
 			{
 				writeChar(js, '}');
-				objD --;
-				next = Key;
+				decObjD();
+				if (objD[arrD] < 1)
+					next = Value;
+				else
+				{
+					next = Key;
+				}
 			}
 			else
 			{
 				sm.putback(buf[0]);
 			}
 			// if we're not in an array and it's not }, write a :
-			if (arrD == 0 && b!= 0xfb)
+			if (b!= 0xfb)
 			{
 				writeChar(js, ':');
 			}
@@ -98,7 +105,7 @@ void Decoder::decode(fstream& sm, ostream& js)
 			case Value:
 			next = Key;
 			nextComma = true;
-			if (arrD >= 1 && b != 0xf9)
+			if (objD[arrD] < 1 && b != 0xf9)
 			{
 				writeComma(js);
 			}
@@ -204,7 +211,7 @@ void Decoder::decode(fstream& sm, ostream& js)
 			// long string
 			else if (b == 0xe0)
 			{
-				cout << "writing long stuff " << endl;
+				//cout << "writing long stuff " << endl;
 				char b[1];
 				sm.read(b, 1);
 				string longS("");
@@ -233,6 +240,8 @@ void Decoder::decode(fstream& sm, ostream& js)
 			{
 				writeChar(js, '[');
 				arrD += 1;
+				while(arrD >= objD.size())
+					objD.push_back(0);
 				nextComma = false;
 				next = Value;
 			}
@@ -244,7 +253,7 @@ void Decoder::decode(fstream& sm, ostream& js)
 			else if (b == 0xfa)
 			{
 				writeChar(js, '{');
-				objD += 1;
+				incObjD();
 				nextComma = false;
 			}
 			else
@@ -252,7 +261,7 @@ void Decoder::decode(fstream& sm, ostream& js)
 				cout << b << endl;
 				cout << 0xfa << endl;
 			}
-			if (arrD >= 1)
+			if (objD[arrD] < 1)
 			{
 				next = Value;
 			}
@@ -262,6 +271,24 @@ void Decoder::decode(fstream& sm, ostream& js)
 		}
 	}
 	return;
+}
+
+void Decoder::incObjD()
+{
+	while (arrD >= objD.size())
+	{
+		objD.push_back(0);
+	}
+	objD[arrD]++;
+}
+
+void Decoder::decObjD()
+{
+	while (arrD >= objD.size())
+	{
+		objD.push_back(0);
+	}
+	objD[arrD]--;
 }
 
 void Decoder::writeComma(ostream& js)
@@ -306,7 +333,7 @@ void Decoder::writeStr(fstream& sm, ostream& js, int length,
 		// replace escape character 
 		if (escapes.find(t) == escapes.end())
 		{
-				s += t;
+			s += t;
 		}
 		else
 		{
