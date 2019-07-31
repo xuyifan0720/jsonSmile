@@ -37,10 +37,14 @@ public:
 	map<string, int> kref;
 	set<string> svals;
 	map<string, int> vref;
+	int arrD;
+	vector<int> objD;
 	int kp;
 	int vp;
 	Encoder();
 	void writeNum(ostream &sm, int value, int l);
+	void incObjD();
+	void decObjD();
 	void encode(istream& js, ostream& sm);
 	void readKey(istream& js, ostream& sm);
 	void readWord(istream& js, ostream& sm, bool quotation);

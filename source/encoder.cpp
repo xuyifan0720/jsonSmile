@@ -11,6 +11,8 @@ Encoder::Encoder()
 	next = Free;
 	kp = 0;
 	vp = 1;
+	arrD = 0;
+	objD.push_back(0);
 }
 
 // write a number that is l bytes long
@@ -26,8 +28,6 @@ void Encoder::encode(istream& js, ostream& sm)
 	char c;
 	string s;
 	int t;
-	int arrD = 0;
-	int objD = 0;
 	bool done = true;
 	// keep looping until we reach the end }
 	while (done)
@@ -54,6 +54,21 @@ void Encoder::encode(istream& js, ostream& sm)
 				break;
 				case '\n':
 				break;
+				case '}':
+				writeNum(sm, 0xfb, 1);
+				decObjD();
+				if (objD[0] <= 0 && arrD <= 0)
+					done = false;
+				if (objD[arrD] < 1 && arrD > 0)
+				{
+					state = Value;
+				}
+				else
+				{
+					state = Key;
+				}
+				next = Free;
+				break;
 				// key needs to be a string
 				default:
 				js.putback(c);
@@ -78,24 +93,20 @@ void Encoder::encode(istream& js, ostream& sm)
 					case ']':
 					writeNum(sm, 0xf9, 1);
 					arrD -= 1;
-					if (objD <= 0 && arrD <= 0)
+					if (objD[0] <= 0 && arrD <= 0)
 						done = false;
 					next = Free;
 					state = Key;
 					break;
 					case '{':
 					writeNum(sm, 0xfa, 1);
-					objD += 1;
+					incObjD();
 					next = Free;
 					state = Key;
 					break;
 					case '}':
-					writeNum(sm, 0xfb, 1);
-					objD -= 1;
-					if (objD <= 0 && arrD <= 0)
-						done = false;
-					next = Free;
-					state = Key;
+					js.putback(c);
+					state = Key;					
 					break;
 					// a quotation mark means the value is a string
 					case '\"':
@@ -104,7 +115,7 @@ void Encoder::encode(istream& js, ostream& sm)
 					case ':':
 					break;
 					case ',':
-					if (arrD == 0)
+					if (objD[arrD] >= 1)
 					{
 						state = Key;
 					}
@@ -147,6 +158,24 @@ void Encoder::encode(istream& js, ostream& sm)
 			break;
 		}
 	}
+}
+
+void Encoder::incObjD()
+{
+	while (arrD >= objD.size())
+	{
+		objD.push_back(0);
+	}
+	objD[arrD]++;
+}
+
+void Encoder::decObjD()
+{
+	while (arrD >= objD.size())
+	{
+		objD.push_back(0);
+	}
+	objD[arrD]--;
 }
 
 // read a key
