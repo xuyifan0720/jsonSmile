@@ -21,18 +21,12 @@ namespace encoder
 }
 
 
-enum Next
-{
-	Free,
-	Word,
-	Number
-};
+
 
 class Encoder
 {
 public:
 	encoder::Content state;
-	Next next;
 	set<string> skeys;
 	map<string, int> kref;
 	set<string> svals;

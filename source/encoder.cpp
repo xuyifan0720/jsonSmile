@@ -4,11 +4,12 @@ using namespace std;
 using namespace encoder;
 
 
-
+// initialize state. kp and vp are key position and value position(in the reference)
+// arrD is how many nested arrays we are in. 
+// objD is how many nested objects we are in for each given arrD
 Encoder::Encoder()
 {
 	state = Head;
-	next = Free;
 	kp = 0;
 	vp = 1;
 	arrD = 0;
@@ -18,29 +19,31 @@ Encoder::Encoder()
 // write a number that is l bytes long
 void Encoder::writeNum(ostream &sm, int value, int l)
 {
-	//cout << "writing number " << value << endl;
 	char* newV = reinterpret_cast<char *> (&value);
 	sm.write(newV, l);
 }
 
 void Encoder::encode(istream& js, ostream& sm)
 {
+	// used for input
 	char c;
 	string s;
 	int t;
 	bool done = true;
-	// keep looping until we reach the end }
+	// keep looping until we reach the end } or ]
 	while (done)
 	{
 		switch(state)
 		{
-			// write smile format header
+			// write smile format header, then switch to value
 			case Head:
 			sm << ":)" << endl;
 			writeNum(sm, 0x03, 1);
 			state = Value;
 			break;
+			// if we encounter a key
 			case Key:
+			// first read one character
 			js >> c;
 			switch(c)
 			{
@@ -54,22 +57,26 @@ void Encoder::encode(istream& js, ostream& sm)
 				break;
 				case '\n':
 				break;
+				// we get out of one nested object
 				case '}':
 				writeNum(sm, 0xfb, 1);
 				decObjD();
+				// if we're out of all arrays and objects, we stop reading
 				if (objD[0] <= 0 && arrD <= 0)
 					done = false;
+				// if we are in the middle of an array and an outmost object ended,
+				// the next thing we'll encounter is a value
 				if (objD[arrD] < 1 && arrD > 0)
 				{
 					state = Value;
 				}
+				// otherwise it's a key
 				else
 				{
 					state = Key;
 				}
-				next = Free;
 				break;
-				// key needs to be a string
+				// key needs to be a string, if it's not, reinterpret it as a value
 				default:
 				js.putback(c);
 				state = Value;
@@ -77,89 +84,74 @@ void Encoder::encode(istream& js, ostream& sm)
 			}
 			break;
 			case Value:
-			switch(next)
+			js >> c;
+			cout << "encountering " << c << endl;
+			switch(c)
 			{
-				case Free:
-				js >> c;
-				cout << "encountering " << c << endl;
-				switch(c)
+				// starts an array, increase array depth and the next thing we encounter
+				// will be a value
+				case '[':
+				writeNum(sm, 0xf8, 1);
+				state = Value;
+				arrD += 1;
+				break;
+				// ends an array, decrease array depth, and if we are not in an array 
+				// or an object, we stop reading from the file.
+				// The next thing we encounter is a key.
+				case ']':
+				writeNum(sm, 0xf9, 1);
+				arrD -= 1;
+				if (objD[0] <= 0 && arrD <= 0)
+					done = false;
+				state = Key;
+				break;
+				// starts an object, increase the object depth of current array level
+				// the next thing we encounter is a key
+				case '{':
+				writeNum(sm, 0xfa, 1);
+				incObjD();
+				state = Key;
+				break;
+				// end of object marker is a key, and shouldn't be here
+				case '}':
+				js.putback(c);
+				state = Key;					
+				break;
+				// a quotation mark means the value is a string
+				case '\"':
+				readWord(js, sm, true);
+				break;
+				case ':':
+				break;
+				// if we read a comma, then if we're in an object, the next thing is 
+				// a key
+				// if we're not in an object, we're in an array, so the next thing is
+				// a value
+				case ',':
+				if (objD[arrD] >= 1)
 				{
-					// structural markers. ] and } may denote the end of the file
-					case '[':
-					writeNum(sm, 0xf8, 1);
-					state = Value;
-					arrD += 1;
-					break;
-					case ']':
-					writeNum(sm, 0xf9, 1);
-					arrD -= 1;
-					if (objD[0] <= 0 && arrD <= 0)
-						done = false;
-					next = Free;
 					state = Key;
-					break;
-					case '{':
-					writeNum(sm, 0xfa, 1);
-					incObjD();
-					next = Free;
-					state = Key;
-					break;
-					case '}':
-					js.putback(c);
-					state = Key;					
-					break;
-					// a quotation mark means the value is a string
-					case '\"':
-					readWord(js, sm, true);
-					break;
-					case ':':
-					break;
-					case ',':
-					if (objD[arrD] >= 1)
-					{
-						state = Key;
-					}
-					break;
-					// skip white space and newline
-					case ' ':
-					break;
-					case '\n':
-					break;
-					// otherwise, it's a number, float, or a literal (true, false, null)
-					default:
-					js.putback(c);
-					readWord(js, sm, false);
-					break;
 				}
 				break;
-				// this case is actually never used, but i just left it there
-				case Word:
-				{
-				char cc = js.peek();
-				if (cc == '{' || cc == '[')
-				{
-					next = Free;
-					break;
-				}
-				if (cc == '\"')
-				{
-					next = Free;
-					break;
-				}
-				else
-					readWord(js, sm, false);
-				next = Free;
+				// skip white space and newline
+				case ' ':
 				break;
-				}
+				case '\n':
+				break;
+				// otherwise, it's a number, float, or a literal (true, false, null)
 				default:
+				js.putback(c);
+				readWord(js, sm, false);
 				break;
 			}
+			break;
 			default:
 			break;
 		}
 	}
 }
 
+// increase the object depth at current array depth
 void Encoder::incObjD()
 {
 	while (arrD >= objD.size())
@@ -169,6 +161,7 @@ void Encoder::incObjD()
 	objD[arrD]++;
 }
 
+// decrease the object depth at current array depth 
 void Encoder::decObjD()
 {
 	while (arrD >= objD.size())
@@ -196,6 +189,7 @@ void Encoder::readKey(istream& js, ostream& sm)
 	while (c != '\"')
 	{
 		// handle escape characters
+		// if we see a \, read one byte further to see if it's a escape character.
 		if (c == '\\')
 		{
 			js >> noskipws >> c;
@@ -210,15 +204,6 @@ void Encoder::readKey(istream& js, ostream& sm)
 				break;
 				case '\\':
 				buf.push_back('\\');
-				break;
-				case '\?':
-				buf.push_back('\?');
-				break;
-				case '\'':
-				buf.push_back('\'');
-				break;
-				case 'a':
-				buf.push_back('\a');
 				break;
 				case 'b':
 				buf.push_back('\b');
@@ -235,9 +220,6 @@ void Encoder::readKey(istream& js, ostream& sm)
 				case 't':
 				buf.push_back('\t');
 				break;
-				case 'v':
-				buf.push_back('\v');
-				break;
 				default:
 				buf.push_back('\\');
 				buf.push_back(c);
@@ -249,7 +231,7 @@ void Encoder::readKey(istream& js, ostream& sm)
 				allAscii = false;
 			}
 		}
-		// collects the characters in a vector
+		// collects the characters into a vector
 		else
 		{
 			buf.push_back(c);
@@ -260,6 +242,7 @@ void Encoder::readKey(istream& js, ostream& sm)
 			}
 		}
 	}
+	// convert char vector into a string
 	string s(buf.begin(), buf.end());
 	int sizes = s.size();
 	int encSize = 0;
@@ -278,11 +261,13 @@ void Encoder::readKey(istream& js, ostream& sm)
 	// small strings
 	if (sizes <= 64)
 	{
+		// if we cannot find the key in the reference list, we have to write the key
 		if (skeys.find(s) == skeys.end())
 		{
 			writeNum(sm, msb|encSize, 1);
 			cout << "writing key " << s << endl;
 			sm.write(s.c_str(),sizes);
+			// put the key into the reference list
 			if (kp < 64)
 			{
 				skeys.insert(s);
@@ -314,11 +299,11 @@ void Encoder::readWord(istream& js, ostream& sm, bool quotation)
 	int value;
 	bool allAscii = true;
 	js >> c;
+	// keep track of whether all characters are ascii
 	if (!isascii(c))
 	{
 		allAscii = false;
 	}
-	//cout << "reading word starting with " << c << endl; 
 	if (c == '\"')
 	{
 		writeNum(sm, 0x20, 1);
@@ -345,15 +330,6 @@ void Encoder::readWord(istream& js, ostream& sm, bool quotation)
 					case '\\':
 					buf.push_back('\\');
 					break;
-					case '\?':
-					buf.push_back('\?');
-					break;
-					case '\'':
-					buf.push_back('\'');
-					break;
-					case 'a':
-					buf.push_back('\a');
-					break;
 					case 'b':
 					buf.push_back('\b');
 					break;
@@ -368,9 +344,6 @@ void Encoder::readWord(istream& js, ostream& sm, bool quotation)
 					break;
 					case 't':
 					buf.push_back('\t');
-					break;
-					case 'v':
-					buf.push_back('\v');
 					break;
 					default:
 					buf.push_back('\\');
@@ -435,9 +408,13 @@ void Encoder::readWord(istream& js, ostream& sm, bool quotation)
 			// small integer
 			if (l >= -16 && l <= 15)
 			{
+				// zigzag encode
 				int k = (n >> 31) ^ (n << 1);
+				// set msb to 0xc0
 				writeNum(sm, (0xc0|k), 1);
 			}
+			// if converting the string to an integer is the same as converting it 
+			// to a long, then we have an integer
 			else if (l == ll)
 			{
 				// can be expressed with an int
@@ -453,6 +430,7 @@ void Encoder::readWord(istream& js, ostream& sm, bool quotation)
 		{
 			try
 			{
+				// try convert to a float and a double
 				double d = stod(s);
 				float f = static_cast<float>(d);
 				double dd = static_cast<double>(f);
@@ -482,8 +460,11 @@ normalString:
 		// determine the smile format token initializer 
 		if (sizes <= 64)
 		{
+			// ascii and unicode have different msb
 			if (allAscii)
 			{
+				// short ascii and medium length ascii have different msb and encoded
+				// size in smile format
 				if (sizes <= 32)
 				{
 					encSize = sizes - 1;
@@ -495,13 +476,16 @@ normalString:
 					msb = 0x60;
 				}
 			}
+			// unicode
 			else
 			{
+				// short unicode
 				if (sizes <= 33)
 				{
 					encSize = sizes - 2;
 					msb = 0x80;
 				}
+				// medium sized unicode
 				else
 				{
 					encSize = sizes - 34;
@@ -509,12 +493,12 @@ normalString:
 				}
 			}
 
-			// check whether it's in reference
+			// check whether it's in reference, if it's not in reference
 			if (svals.find(s) == svals.end())
 			{
 				writeNum(sm, msb|encSize, 1);
-				//cout << "writing word " << s << endl;
 				sm.write(s.c_str(),sizes);
+				// store the value into reference
 				if (vp < 32)
 				{
 					svals.insert(s);
@@ -545,24 +529,31 @@ normalString:
 // write an integer (zigzag encoded)
 void Encoder::writeNum(ostream& sm, int n)
 {
+	// write 0x24 to denote we have an integer next in smile
 	writeNum(sm, 0x24, 1);
+	// zigzag encode our integer
 	int k = (n >> 31) ^ (n << 1);
+	// a vector to keep track of what we will write
 	vector<int> words;
+	// the first thing to write is the 6 lsb of our integer
 	words.push_back(k&0x3f);
 	k >>= 6;
+	// then we write our integer 7 bits at a time
 	while (k > 0)
 	{
 		words.push_back(k&0x7f);
 		k >>= 7;
 	}
+	// actually writing the digits
 	for (int i = words.size() - 1; i >= 1; i --)
 	{
 		writeNum(sm, words[i]&0x7f, 1);
 	}
+	// for the last 6 digit, set msb to 1 so that we know it's the end of current number
 	writeNum(sm, (words[0]&0x3f)|0x80, 1);
 }
 
-// write a long (zigzag encoded)
+// write a long (zigzag encoded), similar to how we write an int
 void Encoder::writeNum(ostream& sm, long n)
 {
 	writeNum(sm, 0x25, 1);
@@ -587,10 +578,13 @@ void Encoder::writeNum(ostream& sm, long n)
 // write a floating point
 void Encoder::writeNum(ostream& sm, float f)
 {
+	// first write 0x28 to indicate we have a floating point next
 	writeNum(sm, 0x28, 1);
+	// reinterpret it as an int 
 	assert(sizeof(float) == sizeof(int));
 	int k = reinterpret_cast<int&>(f);
 	vector<int> words;
+	// write 7 bits at a time, set msb to 0
 	for (int i = 0; i < 5; i ++)
 	{
 		words.push_back(k&0x7f);
@@ -602,7 +596,7 @@ void Encoder::writeNum(ostream& sm, float f)
 	}
 }
 
-// write a double
+// write a double, similar to writing a float.
 void Encoder::writeNum(ostream& sm, double d)
 {
 	writeNum(sm, 0x29, 1);

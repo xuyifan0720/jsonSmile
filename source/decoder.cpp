@@ -77,6 +77,9 @@ void Decoder::decode(fstream& sm, ostream& js)
 				int l = b - 0xc0 + 2;
 				writeStr(sm, js, l, unicode);
 			}
+			// if it's end of object, decrease object depth
+			// if we are still in an object, then the next thing is a key
+			// otherwise, the next thing is a value, since we are in an array
 			else if (b == 0xfb)
 			{
 				writeChar(js, '}');
@@ -88,6 +91,7 @@ void Decoder::decode(fstream& sm, ostream& js)
 					next = Key;
 				}
 			}
+			// if it's something else, put it back and we'll switch into value mode
 			else
 			{
 				sm.putback(buf[0]);
@@ -105,6 +109,8 @@ void Decoder::decode(fstream& sm, ostream& js)
 			case Value:
 			next = Key;
 			nextComma = true;
+			// if we are not in an object and it's not end of array, check if we need
+			// to write a comma. 
 			if (objD[arrD] < 1 && b != 0xf9)
 			{
 				writeComma(js);
@@ -112,17 +118,18 @@ void Decoder::decode(fstream& sm, ostream& js)
 			// short string reference
 			if (b < 0x20)
 			{
-				//cout << "checking index " << b-1 << " for value" << endl;
 				if (b-1 < svals.size())
 				{
 					writeStr(js, svals[b-1]);
 				}
 			}
+			// empty value, just write two quotation mark
 			else if (b == 0x20)
 			{
 				writeChar(js, '\"');
 				writeChar(js, '\"');
 			}
+			// literals, we dont put quotation marks around them. 
 			else if (b == 0x21)
 			{
 				writeStr(js, "null", false);
@@ -139,11 +146,13 @@ void Decoder::decode(fstream& sm, ostream& js)
 			else if (b >= 0x24 && b <= 0x27)
 			{
 				int l = b & 0x03;
+				// an integer
 				if (l == 0)
 				{
 					int n = zigzagDecode(sm);
 					writeNum(js, n);
 				}
+				// a long
 				else if (l == 1)
 				{
 					long n = zigzagLong(sm);
@@ -158,11 +167,13 @@ void Decoder::decode(fstream& sm, ostream& js)
 			else if (b >= 0x28 && b <= 0x2b)
 			{
 				int l = b & 0x03;
+				// a float
 				if (l == 0)
 				{
 					float n = readD(sm);
 					writeNum(js, n);
 				}
+				// a double
 				else if (l == 1)
 				{
 					double n = readD(sm);
@@ -180,24 +191,28 @@ void Decoder::decode(fstream& sm, ostream& js)
 			// short ascii
 			else if (b >= 0x40 && b <= 0x5f)
 			{
+				// length is encoded length + 1
 				int l = (b & 0x1f) + 1;
 				writeStr(sm, js, l, svals);
 			}
 			// middle-length ascii
 			else if (b >= 0x60 && b <= 0x7f)
 			{
+				// length is encoded length + 33
 				int l = (b & 0x1f) + 33;
 				writeStr(sm, js, l, svals);
 			}
 			// short unicode
 			else if (b >= 0x80 && b <= 0x9f)
 			{
+				// length is encoded length + 2
 				int l = (b & 0x1f) + 2;
 				writeStr(sm, js, l, unicode);
 			}
 			// middle-length unicode
 			else if (b >= 0xa0 && b <= 0xbf)
 			{
+				// length is encoded length + 34
 				int l = (b & 0x1f) + 34;
 				writeStr(sm, js, l, unicode);
 			}
@@ -205,28 +220,27 @@ void Decoder::decode(fstream& sm, ostream& js)
 			else if (b >= 0xc0 && b <= 0xdf)
 			{
 				int original = (b - 0xc0);
+				// zigzag decode original integer
 				int written = ZIGZAG(original);
 				writeNum(js, written);
 			}
 			// long string
 			else if (b == 0xe0)
 			{
-				//cout << "writing long stuff " << endl;
 				char b[1];
 				sm.read(b, 1);
 				string longS("");
 				// read characters until 0xfc is encountered
 				while((static_cast<unsigned int> (b[0]) & 0xff) != 0xfc)
 				{
+					// if we need to write an escape character, we write a \ before it
 					if (escapes.find(b[0]) == escapes.end())
 					{
 						longS += b[0];
 					}
 					else
 					{
-						//cout << "in dict " << t << endl;
 						string replace = escapes.find(b[0]) -> second;
-						//cout << "replacement " << replace << endl;
 						longS += replace;
 					}
 					sm.read(b, 1);
@@ -246,6 +260,8 @@ void Decoder::decode(fstream& sm, ostream& js)
 				}
 			}
 			// structural markers
+			// when we start an array, we dont put comma before the next element, and 
+			// the next thing we encounter is a value. 
 			else if (b == 0xf8)
 			{
 				writeChar(js, '[');
@@ -255,11 +271,14 @@ void Decoder::decode(fstream& sm, ostream& js)
 				nextComma = false;
 				next = Value;
 			}
+			// end of array, decrease array depth.
 			else if (b == 0xf9)
 			{
 				writeChar(js, ']');
 				arrD -= 1;
 			}
+			// start an object, increase object depth, the next element won't have 
+			// comma in front of it
 			else if (b == 0xfa)
 			{
 				writeChar(js, '{');
@@ -271,6 +290,8 @@ void Decoder::decode(fstream& sm, ostream& js)
 				cout << b << endl;
 				cout << 0xfa << endl;
 			}
+			// if we're in an array and not in an object, the next thing we'll encounter
+			// is a value, otherwise it's a key. 
 			if (objD[arrD] < 1)
 			{
 				next = Value;
@@ -301,6 +322,7 @@ void Decoder::decObjD()
 	objD[arrD]--;
 }
 
+// check if we need to write a comma, and write it if we do. 
 void Decoder::writeComma(ostream& js)
 {
 	if (comma)
@@ -369,7 +391,7 @@ void Decoder::writeStr(fstream& sm, ostream& js, int length,
 	return;
 }
 
-// write a constant string s
+// write a constant string s, c is whether we have to put quotation marks around it.
 void Decoder::writeStr(ostream& js, string s, bool c)
 {
 	if (c)
@@ -426,12 +448,15 @@ int Decoder::vInt(fstream& sm)
 {
 	int z = 0;
 	nextB(sm);
+	// for each byte, read the 7 least significant bits and write them to the number
+	// starting from the msb. Until we hit a byte that starts with a 1
 	while(!(*buf & 0x80))
 	{
 		z <<= 7;
 		z |= (static_cast<int>(*buf) & 0x7f);
 		nextB(sm);
 	}
+	// for the last byte, we only need the 6 lsb. 
 	z <<= 6;
 	z |= (static_cast<int>(*buf) & 0x3f);
 	return z;
@@ -449,6 +474,7 @@ long Decoder::vLong(fstream& sm)
 {
 	long z = 0;
 	nextB(sm);
+	// similar to how we read one int
 	while(!(*buf & 0x80))
 	{
 		z <<= 7;
@@ -471,6 +497,7 @@ double Decoder::readD(fstream& sm)
 {
 	nextB(sm);
 	long l = static_cast<long>(buf[0])&0xff;
+	// for the next 9 bytes, take 7 lsb and write them to the long, msb comes first
 	for (int i = 0; i < 9; i ++)
 	{
 		nextB(sm);
@@ -478,6 +505,7 @@ double Decoder::readD(fstream& sm)
 		l <<= 7;
 		l |= k;
 	}
+	// reinterpret the bits as a double
 	assert(sizeof(long) == sizeof(double));
 	double d = reinterpret_cast<double&>(l);
 	return d;
@@ -488,6 +516,7 @@ float Decoder::readF(fstream& sm)
 {
 	nextB(sm);
 	int n = static_cast<int>(buf[0])&0xff;
+	// similar to double, except a float in smile has 5 bytes
 	for (int i = 0; i < 5; i ++)
 	{
 		nextB(sm);
